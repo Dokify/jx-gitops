@@ -2,6 +2,8 @@ package report
 
 import (
 	"fmt"
+	"github.com/helmfile/helmfile/pkg/filesystem"
+	"github.com/helmfile/helmfile/pkg/tmpl"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,7 +26,6 @@ import (
 	"github.com/jenkins-x/jx-helpers/v3/pkg/kube/services"
 	"github.com/jenkins-x/jx-helpers/v3/pkg/options"
 	"github.com/jenkins-x/jx-helpers/v3/pkg/termcolor"
-	"github.com/jenkins-x/jx-helpers/v3/pkg/yaml2s"
 	"github.com/jenkins-x/jx-helpers/v3/pkg/yamls"
 	"github.com/jenkins-x/jx-logging/v3/pkg/log"
 	"github.com/pkg/errors"
@@ -222,6 +223,35 @@ func (o *Options) Run() error {
 	return o.generateChartCRDs()
 }
 
+func (o *Options) loadHelmFile(fileName string, dest interface{}) error {
+	exists, err := files.FileExists(fileName)
+	if err != nil {
+		return fmt.Errorf("failed to check if file exists  %s: %w", fileName, err)
+	}
+	if !exists {
+		return nil
+	}
+
+	var d interface{}
+	fileRenderer := tmpl.NewFileRenderer(filesystem.DefaultFileSystem(), ".", d)
+
+	data, err := fileRenderer.RenderToBytes(fileName)
+	if err != nil {
+		return fmt.Errorf("failed to read file %s: %w", fileName, err)
+	}
+
+	stringData, err := fileRenderer.RenderTemplateContentToString(data)
+	if err != nil {
+		return fmt.Errorf("failed to render template content to string %s: %w", fileName, err)
+	}
+
+	err = yaml.Unmarshal([]byte(stringData), dest)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal file %s: %w", fileName, err)
+	}
+	return nil
+}
+
 func (o *Options) processHelmfile(helmfile helmfiles.Helmfile) (*releasereport.NamespaceReleases, error) {
 	answer := &releasereport.NamespaceReleases{}
 	// ignore the root file
@@ -230,7 +260,8 @@ func (o *Options) processHelmfile(helmfile helmfiles.Helmfile) (*releasereport.N
 	}
 	helmState := &state.HelmState{}
 	path := helmfile.Filepath
-	err := yaml2s.LoadFile(path, helmState)
+
+	err := o.loadHelmFile(path, helmState)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to load helmfile %s", helmfile)
 	}
